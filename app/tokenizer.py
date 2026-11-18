@@ -18,6 +18,9 @@ _CHARS = [chr(code) for code in range(0x20, 0x7F)]  # 95 个可打印 ASCII 字�
 VOCAB_SIZE = _FIRST_CHAR_ID + len(_CHARS)  # 98
 _CHAR_TO_ID = {ch: _FIRST_CHAR_ID + i for i, ch in enumerate(_CHARS)}
 
+# 95 个可打印 ASCII 字符（校准预测集合的候选全集）
+PRINTABLE_CHARS = tuple(_CHARS)
+
 # id -> 展示用文本
 _DISPLAY = {PAD_ID: "<pad>", UNK_ID: "<unk>", EOS_ID: "<eos>"}
 for _i, _ch in enumerate(_CHARS):
@@ -30,6 +33,11 @@ def encode(text: str) -> list[int]:
     for ch in text:
         ids.append(_CHAR_TO_ID.get(ch, UNK_ID))
     return ids
+
+
+def char_id(ch: str) -> int:
+    """单个可打印 ASCII 字符的 token id（校准用）。"""
+    return _CHAR_TO_ID[ch]
 
 
 def decode(ids: list[int]) -> str:

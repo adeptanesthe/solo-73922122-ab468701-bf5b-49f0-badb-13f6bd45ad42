@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>下一字符校准台 · Split Conformal Calibration</title>
+<style>
+  :root {
+    --bg: #0f1419; --panel: #1a2129; --line: #2c3743;
+    --txt: #d8e0e8; --muted: #8a97a5; --accent: #4da3ff;
+    --ok: #3fb96b; --bad: #ff5c5c; --warn: #e0a13c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--txt);
+    font-family: "SF Mono", "Menlo", "Consolas", monospace; font-size: 14px;
+  }
+  header { padding: 18px 28px; border-bottom: 1px solid var(--line); }
+  header h1 { margin: 0 0 6px; font-size: 20px; }
+  header p { margin: 0; color: var(--muted); font-size: 12px; }
+  header a { color: var(--accent); text-decoration: none; }
+  main { padding: 24px 28px; max-width: 1180px; margin: 0 auto; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 18px; margin-bottom: 20px;
+  }
+  h3 { margin: 0 0 10px; font-size: 14px; color: var(--accent); }
+  label { display: block; color: var(--muted); margin-bottom: 6px; font-size: 12px; }
+  input[type=text], textarea {
+    width: 100%; background: #0c1116; color: var(--txt);
+    border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px;
+    font-family: inherit; font-size: 14px;
+  }
+  textarea { min-height: 90px; resize: vertical; }
+  button {
+    background: var(--accent); color: #08111c; border: 0; border-radius: 6px;
+    padding: 9px 20px; font-weight: 700; cursor: pointer; font-family: inherit;
+  }
+  button:hover { filter: brightness(1.1); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+  button.small { padding: 3px 10px; font-size: 12px; }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-end; }
+  .badge {
+    display: inline-block; padding: 3px 10px; border-radius: 20px;
+    font-size: 12px; font-weight: 700;
+  }
+  .badge.rev { background: rgba(77,163,255,.15); color: var(--accent); border: 1px solid var(--accent); }
+  .badge.stale { background: rgba(224,161,60,.15); color: var(--warn); border: 1px solid var(--warn); }
+  .badge.okb { background: rgba(63,185,107,.15); color: var(--ok); border: 1px solid var(--ok); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  td input[type=text] { padding: 5px 8px; font-size: 13px; }
+  .err-list { color: var(--bad); margin-top: 10px; font-size: 13px; }
+  .err-list div { margin: 2px 0; }
+  .notice {
+    margin-top: 12px; padding: 10px 14px; border-radius: 8px; font-size: 13px;
+  }
+  .notice.warn { background: rgba(224,161,60,.12); border: 1px solid var(--warn); color: #f0c987; }
+  .notice.bad { background: rgba(255,92,92,.12); border: 1px solid var(--bad); color: #ffc4c4; }
+  .notice.ok { background: rgba(63,185,107,.12); border: 1px solid var(--ok); color: #a9e8c1; }
+  .hidden { display: none; }
+  .tokens { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .tok {
+    padding: 2px 6px; border-radius: 4px; background: #232d38;
+    border: 1px solid var(--line); white-space: pre; font-size: 13px;
+  }
+  .empty-set { color: var(--warn); font-weight: 700; }
+  .metric { display: inline-block; margin-right: 22px; color: var(--muted); font-size: 13px; }
+  .metric b { color: var(--txt); }
+  .review-yes { color: var(--warn); font-weight: 700; }
+  .review-no { color: var(--ok); }
+  details { margin-top: 10px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  .radio-row { display: flex; gap: 18px; align-items: center; }
+  .radio-row label { color: var(--txt); margin: 0; display: flex; gap: 6px; align-items: center; }
+  .prompt-cell { white-space: pre-wrap; word-break: break-all; max-width: 260px; }
+  .jobline { margin-top: 10px; color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>下一字符校准台 <span style="color:var(--muted);font-weight:400;font-size:13px">Split Conformal · 固定目标模型 · 有限样本修正</span></h1>
+  <p>录入人工核实的「提示词 → 真实下一字符」样本，用目标模型真值概率计算非一致性分数
+     s = −ln P（与 1−P 分数严格单调等价，且避免高置信度模型下的浮点饱和），
+     按有限样本修正的 split conformal 分位数输出可打印 ASCII 下一字符集合；并列分数全部纳入，空集如实展示。
+     <a href="/">→ 前往推测解码验证台</a></p>
+</header>
+<main>
+  <section class="panel">
+    <h3>① 样本批次（人工核实，10～30 条）</h3>
+    <div style="margin-bottom:10px">
+      <span class="badge rev" id="revBadge">修订 #0</span>
+      <span class="badge stale hidden" id="dirtyBadge">有未提交修改</span>
+      <span class="badge stale hidden" id="otherRevBadge">其他窗口已提交新修订</span>
+    </div>
+    <div id="conflictBox" class="notice bad hidden">
+      提交被拒绝：样本已被其他窗口修改（修订号已变），你的修改<b>未覆盖</b>服务器数据。
+      <button class="small ghost" id="reloadBtn" type="button">放弃我的修改并载入最新</button>
+    </div>
+    <table>
+      <thead><tr><th style="width:36px">#</th><th>提示词（1～32 个可打印 ASCII）</th>
+        <th style="width:150px">真实下一字符</th><th style="width:70px"></th></tr></thead>
+      <tbody id="sampleBody"></tbody>
+    </table>
+    <div class="row" style="margin-top:12px">
+      <button class="ghost" id="addRow" type="button">＋ 添加样本</button>
+      <button class="ghost" id="fillExample" type="button">填入示例批次</button>
+      <button id="saveBtn" type="button">提交修订</button>
+    </div>
+    <div class="err-list hidden" id="sampleErr"></div>
+    <div class="notice ok hidden" id="saveOk"></div>
+  </section>
+
+  <section class="panel">
+    <h3>② 校准计算</h3>
+    <div class="row">
+      <div style="min-width:200px">
+        <label>错误率 α（覆盖率 ≥ 1−α）</label>
+        <div class="radio-row">
+          <label><input type="radio" name="alpha" value="0.1" checked /> 0.1</label>
+          <label><input type="radio" name="alpha" value="0.2" /> 0.2</label>
+        </div>
+      </div>
+      <div style="flex:3;min-width:280px">
+        <label for="testPrompts">待判提示词（每行一条，1～32 个可打印 ASCII，至多 20 条）</label>
+        <textarea id="testPrompts" placeholder="the quick brown &#10;hello, my name is "></textarea>
+      </div>
+      <div><button id="computeBtn" type="button">开始校准计算</button></div>
+    </div>
+    <div class="err-list hidden" id="computeErr"></div>
+    <div class="jobline hidden" id="jobLine"></div>
+  </section>
+
+  <section class="panel" id="resultPanel">
+    <h3>③ 校准结论（按修订号标记，旧版结论不冒充新版）</h3>
+    <div id="noResult" style="color:var(--muted)">尚无成功计算。请先录入样本并发起计算。</div>
+    <div id="resultBody" class="hidden">
+      <div id="staleBox" class="notice warn hidden"></div>
+      <div style="margin:10px 0">
+        <span class="metric">基于样本修订 <b id="rRev">-</b></span>
+        <span class="metric">样本数 n <b id="rN">-</b></span>
+        <span class="metric">α <b id="rAlpha">-</b></span>
+        <span class="metric">分位序号 k <b id="rK">-</b></span>
+        <span class="metric">分位数 q̂ (nats) <b id="rQ">-</b></span>
+        <span class="metric">入集概率阈值 e^(−q̂) <b id="rThr">-</b></span>
+        <span class="metric">完成时间 <b id="rTime">-</b></span>
+      </div>
+      <details>
+        <summary>校准分数明细（s = −ln P(真实下一字符 | 提示词)，q̂ 取第 k 小）</summary>
+        <table style="margin-top:8px">
+          <thead><tr><th>#</th><th>提示词</th><th>真实下一字符</th><th>P(真值)</th><th>分数 s (nats)</th></tr></thead>
+          <tbody id="scoreBody"></tbody>
+        </table>
+      </details>
+      <h3 style="margin-top:16px">待判提示词的下一字符集合</h3>
+      <table>
+        <thead><tr><th>待判提示词</th><th>预测集合（可打印 ASCII）</th><th>集合大小</th><th>模型 top-1</th><th>复核建议</th></tr></thead>
+        <tbody id="predBody"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let serverState = null;   // 最近一次从服务器拿到的状态
+let dirty = false;        // 样本编辑区有未提交修改
+let baseRev = 0;          // 我的修改所基于的修订号
+
+const EXAMPLE_SAMPLES = [
+  ["the quick brown ", "f"], ["hello, my name is ", "j"], ["1 + 1 = ", "2"],
+  ["to be or not to ", "b"], ["a b c d e f ", "g"], ["the capital of france is ", "p"],
+  ["once upon a ", "t"], ["https://www.", "e"], ["dear sir or ", "m"],
+  ["happy new ", "y"], ["rock paper ", "s"], ["the answer is ", "4"],
+];
+
+function showErr(el, msgs) {
+  el.innerHTML = "";
+  msgs.forEach((m) => { const d = document.createElement("div"); d.textContent = m; el.appendChild(d); });
+  el.classList.toggle("hidden", msgs.length === 0);
+}
+function fmt(x, nd = 3) { return Number(x).toFixed(nd); }
+// 概率显示：极小值用科学计数法（本模型真值概率可低至 1e-40 以下）
+function fmtP(p) {
+  p = Number(p);
+  if (p === 0) return "0";
+  if (p < 1e-4) return p.toExponential(2);
+  return p.toFixed(4);
+}
+function disp(ch) { return ch === " " ? "␣" : ch; }
+
+// ---- 样本编辑区 ----
+function markDirty() {
+  dirty = true;
+  $("dirtyBadge").classList.remove("hidden");
+  updateRevBadges();
+}
+function updateRevBadges() {
+  if (!serverState) return;
+  $("revBadge").textContent = "修订 #" + serverState.revision + (dirty ? `（我基于 #${baseRev} 编辑）` : "");
+  const otherChanged = dirty && serverState.revision !== baseRev;
+  $("otherRevBadge").classList.toggle("hidden", !otherChanged);
+}
+
+function addRow(prompt, nextChar) {
+  const tr = document.createElement("tr");
+  const idxTd = document.createElement("td");
+  const pTd = document.createElement("td");
+  const pIn = document.createElement("input");
+  pIn.type = "text"; pIn.maxLength = 32; pIn.value = prompt || "";
+  pIn.placeholder = "可打印 ASCII，1～32 字符";
+  pIn.oninput = markDirty;
+  pTd.appendChild(pIn);
+  const cTd = document.createElement("td");
+  const cIn = document.createElement("input");
+  cIn.type = "text"; cIn.maxLength = 1; cIn.value = nextChar || "";
+  cIn.oninput = markDirty;
+  cTd.appendChild(cIn);
+  const delTd = document.createElement("td");
+  const del = document.createElement("button");
+  del.className = "small ghost"; del.textContent = "删除"; del.type = "button";
+  del.onclick = () => { tr.remove(); markDirty(); renumber(); };
+  delTd.appendChild(del);
+  tr.append(idxTd, pTd, cTd, delTd);
+  $("sampleBody").appendChild(tr);
+  renumber();
+}
+function renumber() {
+  [...$("sampleBody").rows].forEach((tr, i) => { tr.cells[0].textContent = i + 1; });
+}
+function readRows() {
+  return [...$("sampleBody").rows].map((tr) => ({
+    prompt: tr.cells[1].querySelector("input").value,
+    next_char: tr.cells[2].querySelector("input").value,
+  }));
+}
+function renderSamples(samples) {
+  $("sampleBody").innerHTML = "";
+  samples.forEach((s) => addRow(s.prompt, s.next_char));
+  dirty = false;
+  baseRev = serverState.revision;
+  $("dirtyBadge").classList.add("hidden");
+  updateRevBadges();
+}
+
+const PRINTABLE = /^[\x20-\x7E]*$/;
+function validateLocal(samples) {
+  const errs = [];
+  if (samples.length < 10 || samples.length > 30)
+    errs.push(`样本数量须为 10～30 条，当前 ${samples.length} 条。`);
+  samples.forEach((s, i) => {
+    if (s.prompt.length < 1 || s.prompt.length > 32)
+      errs.push(`第 ${i + 1} 条：提示词长度须为 1～32 字符，当前 ${s.prompt.length}。`);
+    else if (!PRINTABLE.test(s.prompt))
+      errs.push(`第 ${i + 1} 条：提示词含非可打印 ASCII 字符。`);
+    if (s.next_char.length !== 1)
+      errs.push(`第 ${i + 1} 条：下一字符须恰好 1 个字符。`);
+    else if (!PRINTABLE.test(s.next_char))
+      errs.push(`第 ${i + 1} 条：下一字符须为可打印 ASCII。`);
+  });
+  return errs;
+}
+
+$("addRow").onclick = () => { addRow("", ""); markDirty(); };
+$("fillExample").onclick = () => {
+  $("sampleBody").innerHTML = "";
+  EXAMPLE_SAMPLES.forEach(([p, c]) => addRow(p, c));
+  markDirty();
+};
+$("reloadBtn").onclick = () => { $("conflictBox").classList.add("hidden"); refresh(true); };
+
+$("saveBtn").onclick = async () => {
+  const samples = readRows();
+  const errs = validateLocal(samples);
+  showErr($("sampleErr"), errs);
+  $("saveOk").classList.add("hidden");
+  $("conflictBox").classList.add("hidden");
+  if (errs.length) return;
+  let r, data;
+  try {
+    r = await fetch("/api/calibration/samples", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ base_revision: baseRev, samples }),
+    });
+    data = await r.json();
+  } catch (e) { showErr($("sampleErr"), [String(e)]); return; }
+  if (r.ok) {
+    dirty = false;
+    baseRev = data.revision;
+    $("dirtyBadge").classList.add("hidden");
+    $("saveOk").textContent = `已提交，当前修订 #${data.revision}。`;
+    $("saveOk").classList.remove("hidden");
+    refresh(false);
+  } else if (r.status === 409) {
+    $("conflictBox").classList.remove("hidden");
+    refresh(false);
+  } else {
+    showErr($("sampleErr"), [data.error || "提交失败"].concat(data.details || []));
+  }
+};
+
+// ---- 计算 ----
+$("computeBtn").onclick = async () => {
+  const alpha = parseFloat(document.querySelector("input[name=alpha]:checked").value);
+  let lines = $("testPrompts").value.split("\n");
+  if (lines.length && lines[lines.length - 1] === "") lines.pop();
+  const errs = [];
+  if (lines.length < 1 || lines.length > 20) errs.push(`待判提示词须为 1～20 条，当前 ${lines.length} 条。`);
+  lines.forEach((p, i) => {
+    if (p.length < 1 || p.length > 32) errs.push(`第 ${i + 1} 条待判提示词长度须为 1～32 字符，当前 ${p.length}。`);
+    else if (!PRINTABLE.test(p)) errs.push(`第 ${i + 1} 条待判提示词含非可打印 ASCII 字符。`);
+  });
+  showErr($("computeErr"), errs);
+  if (errs.length) return;
+  let r, data;
+  try {
+    r = await fetch("/api/calibration/compute", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ alpha, test_prompts: lines }),
+    });
+    data = await r.json();
+  } catch (e) { showErr($("computeErr"), [String(e)]); return; }
+  if (!r.ok) {
+    showErr($("computeErr"), [data.error || "计算请求失败"].concat(data.details || []));
+    return;
+  }
+  refresh(false);
+};
+
+// ---- 状态刷新与渲染 ----
+async function refresh(forceSamples) {
+  let st;
+  try {
+    const r = await fetch("/api/calibration/state");
+    st = await r.json();
+  } catch (e) { return; }
+  serverState = st;
+  if (!dirty || forceSamples) renderSamples(st.samples);
+  else updateRevBadges();
+  renderJob(st);
+  renderResult(st);
+}
+
+function renderJob(st) {
+  const jl = $("jobLine");
+  if (st.job && st.job.status === "running") {
+    jl.textContent = `计算进行中…（任务 ${st.job.id}，基于修订 #${st.job.revision}，α=${st.job.alpha}；期间仍可提交样本修订）`;
+    jl.classList.remove("hidden");
+    $("computeBtn").disabled = true;
+  } else {
+    $("computeBtn").disabled = false;
+    if (st.job && st.job.status === "failed") {
+      jl.textContent = `最近一次计算失败（任务 ${st.job.id}，基于修订 #${st.job.revision}）：${st.job.error}。下方保留上次成功结果。`;
+      jl.classList.remove("hidden");
+    } else {
+      jl.classList.add("hidden");
+    }
+  }
+}
+
+function renderResult(st) {
+  const last = st.last_success;
+  $("noResult").classList.toggle("hidden", !!last);
+  $("resultBody").classList.toggle("hidden", !last);
+  if (!last) return;
+  const staleBox = $("staleBox");
+  if (st.stale) {
+    staleBox.innerHTML = `⚠ 此结论基于样本修订 <b>#${last.revision}</b>，而当前样本已到修订 ` +
+      `<b>#${st.revision}</b>——旧版计算结果，仅供参考，不代表当前样本的结论。`;
+    staleBox.classList.remove("hidden");
+  } else {
+    staleBox.classList.add("hidden");
+  }
+  $("rRev").textContent = "#" + last.revision + (st.stale ? "（已过时）" : "（当前）");
+  $("rN").textContent = last.n;
+  $("rAlpha").textContent = last.alpha;
+  $("rK").textContent = last.k;
+  $("rQ").textContent = fmt(last.q_hat);
+  $("rThr").textContent = fmtP(last.prob_threshold);
+  $("rTime").textContent = last.finished_at;
+
+  const sb = $("scoreBody");
+  sb.innerHTML = "";
+  last.scores.forEach((s, i) => {
+    const tr = document.createElement("tr");
+    [i + 1, s.prompt, disp(s.next_char), fmtP(s.p_true), fmt(s.score)].forEach((v, j) => {
+      const td = document.createElement("td");
+      td.textContent = v;
+      if (j === 1) td.className = "prompt-cell";
+      tr.appendChild(td);
+    });
+    sb.appendChild(tr);
+  });
+
+  const pb = $("predBody");
+  pb.innerHTML = "";
+  last.results.forEach((r) => {
+    const tr = document.createElement("tr");
+    const pTd = document.createElement("td");
+    pTd.className = "prompt-cell"; pTd.textContent = r.prompt;
+    const setTd = document.createElement("td");
+    if (r.empty) {
+      const s = document.createElement("span");
+      s.className = "empty-set";
+      s.textContent = "∅ 空集（无任何可打印字符达到阈值，如实展示）";
+      setTd.appendChild(s);
+    } else {
+      const div = document.createElement("div");
+      div.className = "tokens";
+      r.set.forEach((ch) => {
+        const t = document.createElement("span");
+        t.className = "tok"; t.textContent = disp(ch);
+        div.appendChild(t);
+      });
+      setTd.appendChild(div);
+    }
+    const sizeTd = document.createElement("td");
+    sizeTd.textContent = r.set_size + " / 95";
+    const topTd = document.createElement("td");
+    topTd.textContent = `${disp(r.top1.char)}（p=${fmtP(r.top1.prob)}）`;
+    const revTd = document.createElement("td");
+    revTd.textContent = r.review_reason;
+    revTd.className = r.needs_review ? "review-yes" : "review-no";
+    tr.append(pTd, setTd, sizeTd, topTd, revTd);
+    pb.appendChild(tr);
+  });
+}
+
+refresh(true);
+setInterval(() => refresh(false), 1000);
+</script>
+</body>
+</html>

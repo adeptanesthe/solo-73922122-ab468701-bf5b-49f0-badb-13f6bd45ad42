@@ -79,7 +79,8 @@
 <body>
 <header>
   <h1>推测解码验证台 <span style="color:var(--muted);font-weight:400;font-size:13px">Speculative Decoding · CPU 小模型 · 固定权重</span></h1>
-  <p>目标模型每轮一次前向整块核验草稿；两模型复用 KV 缓存不重算前缀。推测结果必须与无缓存逐 token 贪心基线逐 token 完全一致，平局取词表序号小者。</p>
+  <p>目标模型每轮一次前向整块核验草稿；两模型复用 KV 缓存不重算前缀。推测结果必须与无缓存逐 token 贪心基线逐 token 完全一致，平局取词表序号小者。
+     <a href="/calibration" style="color:var(--accent);text-decoration:none">→ 前往下一字符校准台</a></p>
 </header>
 <main>
   <section class="panel">

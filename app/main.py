@@ -11,6 +11,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import tokenizer
+from .calibration import STORE as CALIBRATION_STORE
+from .calibration import BusyError, ConflictError, ValidationError
 from .decoding import compare
 from .model import get_models
 
@@ -123,6 +125,66 @@ def decode(req: DecodeRequest) -> JSONResponse:
 def presets() -> dict:
     """返回固定的两条预设（由测试套件锁定其判定类型，避免请求时全量扫描）。"""
     return {"reject": PRESET_REJECT, "all_accepted": PRESET_ALL_ACCEPTED}
+
+
+# ---- 下一字符 split conformal 校准 ----
+
+class CalibrationSample(BaseModel):
+    prompt: str
+    next_char: str
+
+
+class SamplesSubmitRequest(BaseModel):
+    base_revision: int = Field(ge=0)
+    samples: list[CalibrationSample]
+
+
+class CalibrationComputeRequest(BaseModel):
+    alpha: float
+    test_prompts: list[str]
+
+
+@app.get("/api/calibration/state")
+def calibration_state() -> dict:
+    """样本批次、修订号、任务状态与上次成功结果（含其修订号）。"""
+    return CALIBRATION_STORE.state()
+
+
+@app.put("/api/calibration/samples")
+def calibration_submit_samples(req: SamplesSubmitRequest) -> JSONResponse:
+    """整批提交样本修订：须基于所见修订号，冲突返回 409 且不覆盖。"""
+    try:
+        new_revision = CALIBRATION_STORE.submit_samples(
+            req.base_revision, [s.model_dump() for s in req.samples]
+        )
+    except ConflictError as exc:
+        return JSONResponse(
+            status_code=409,
+            content={"error": "修订冲突：样本已被其他窗口修改，未覆盖。",
+                     "current_revision": exc.current_revision},
+        )
+    except ValidationError as exc:
+        return JSONResponse(status_code=400,
+                            content={"error": "样本不合法", "details": exc.details})
+    return JSONResponse({"ok": True, "revision": new_revision})
+
+
+@app.post("/api/calibration/compute")
+def calibration_compute(req: CalibrationComputeRequest) -> JSONResponse:
+    """发起后台校准计算（基于当前样本修订号快照，结果标记该修订号）。"""
+    try:
+        job = CALIBRATION_STORE.start_compute(req.alpha, req.test_prompts)
+    except BusyError as exc:
+        return JSONResponse(status_code=409, content={"error": str(exc)})
+    except ValidationError as exc:
+        return JSONResponse(status_code=400,
+                            content={"error": "参数不合法", "details": exc.details})
+    return JSONResponse(status_code=202, content={"ok": True, "job": job.public()})
+
+
+@app.get("/calibration")
+def calibration_page() -> FileResponse:
+    return FileResponse(os.path.join(STATIC_DIR, "calibration.html"))
 
 
 @app.get("/")

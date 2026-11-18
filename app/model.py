@@ -15,6 +15,9 @@
 
 from __future__ import annotations
 
+import threading
+from contextlib import contextmanager
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -70,6 +73,9 @@ class CausalTransformer(nn.Module):
         self._cache: list[tuple[torch.Tensor, torch.Tensor]] | None = None
         self.cache_len = 0
         self.forward_count = 0
+        # 线程本地状态：校准等旁路分析在本线程暂停前向计数，
+        # 不影响其他线程（如解码请求）的计数
+        self._tls = threading.local()
 
     # ---- 缓存管理 ----
     def init_cache(self) -> None:
@@ -95,6 +101,20 @@ class CausalTransformer(nn.Module):
 
     def reset_stats(self) -> None:
         self.forward_count = 0
+
+    @contextmanager
+    def forward_count_suspended(self):
+        """在本线程内暂停前向计数（校准等旁路分析用）。
+
+        暂停是线程本地的：旁路线程的前向不计入 forward_count，
+        其他线程（如解码请求）的计数行为完全不受影响。
+        """
+        prev = getattr(self._tls, "suspend_count", False)
+        self._tls.suspend_count = True
+        try:
+            yield
+        finally:
+            self._tls.suspend_count = prev
 
     # ---- 前向 ----
     def _attention_layer(self, x: torch.Tensor,
@@ -149,9 +169,11 @@ class CausalTransformer(nn.Module):
         - 传入 2D 张量：返回 (batch, seq_len, vocab_size)，仅无缓存模式支持。
         use_cache=True 时走增量路径并追加/复用 KV 缓存；
         use_cache=False 时整序列重算（基线路径），不触碰缓存。
-        每次调用 forward_count += 1。
+        每次调用 forward_count += 1（本线程计数被 forward_count_suspended
+        暂停时除外）。
         """
-        self.forward_count += 1
+        if not getattr(self._tls, "suspend_count", False):
+            self.forward_count += 1
         batched = isinstance(token_ids, torch.Tensor) and token_ids.dim() == 2
         if isinstance(token_ids, list):
             x_in = torch.tensor([token_ids], dtype=torch.long)
